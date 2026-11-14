@@ -110,6 +110,23 @@ class Net {
     }
   }
 
+  static Future<bool> wifiEnabled() async {
+    try {
+      return await _ch.invokeMethod<bool>('wifiEnabled') ?? true;
+    } catch (_) {
+      return true;
+    }
+  }
+
+  /// "enabled": açıldı, "panel": kullanıcıya Wi-Fi paneli gösterildi, "failed".
+  static Future<String> enableWifi() async {
+    try {
+      return await _ch.invokeMethod<String>('enableWifi') ?? 'failed';
+    } catch (_) {
+      return 'failed';
+    }
+  }
+
   /// Uygulamanın trafiğini Wi-Fi'a sabitler. İnterneti olmayan erişim
   /// noktasında telefon mobil veriye kaçmasın diye gerekli.
   static Future<bool> bindWifi() async {

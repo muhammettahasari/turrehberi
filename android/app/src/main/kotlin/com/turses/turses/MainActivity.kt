@@ -86,6 +86,8 @@ class MainActivity : FlutterActivity() {
                         result
                     )
                     "bindWifi" -> result.success(bindWifi())
+                    "wifiEnabled" -> result.success(wifiManager().isWifiEnabled)
+                    "enableWifi" -> result.success(enableWifi())
                     "unbind" -> {
                         releaseWifi()
                         result.success(true)
@@ -324,6 +326,27 @@ class MainActivity : FlutterActivity() {
         }
         cm.bindProcessToNetwork(null)
         return false
+    }
+
+    /**
+     * Wi-Fi'ı açar. Android 10+ uygulamaların Wi-Fi'ı doğrudan açmasına izin
+     * vermez; bunun yerine tek dokunuşla açılan sistem paneli gösterilir.
+     * Dönüş: "enabled", "panel" ya da "failed".
+     */
+    @Suppress("DEPRECATION")
+    private fun enableWifi(): String {
+        val wm = wifiManager()
+        if (wm.isWifiEnabled) return "enabled"
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            return if (startSafely(Intent(Settings.Panel.ACTION_WIFI))) "panel"
+            else if (startSafely(Intent(Settings.ACTION_WIFI_SETTINGS))) "panel"
+            else "failed"
+        }
+        return try {
+            if (wm.setWifiEnabled(true)) "enabled" else "failed"
+        } catch (e: Exception) {
+            "failed"
+        }
     }
 
     private fun releaseWifi() {

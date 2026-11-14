@@ -104,10 +104,34 @@ class _ListenerPageState extends State<ListenerPage> {
     _connect();
   }
 
+  /// Wi-Fi kapalıysa açar (Android 10+ tek dokunuşluk sistem paneli ile).
+  Future<bool> _ensureWifiOn() async {
+    if (await Net.wifiEnabled()) return true;
+    final r = await Net.enableWifi();
+    if (r == 'enabled') return true;
+    if (r == 'failed') {
+      _setStatus('Wi-Fi kapalı. Lütfen Wi-Fi\'ı açın; uygulama bağlanmayı deneyecek.',
+          _Phase.connecting);
+      return false;
+    }
+    _setStatus('Wi-Fi kapalı. Açılan pencereden Wi-Fi\'ı açın.', _Phase.connecting);
+    for (var i = 0; i < 60; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+      if (_closing || !mounted) return false;
+      if (await Net.wifiEnabled()) {
+        await Future<void>.delayed(const Duration(seconds: 1)); // Wi-Fi'ın hazır olması için
+        return true;
+      }
+    }
+    _setStatus('Wi-Fi açılmadı. Açtıktan sonra "Ağa yeniden bağlan"a dokunun.', _Phase.connecting);
+    return false;
+  }
+
   /// Karekoddaki Wi-Fi ağına bağlanır. Android "Bağlan" onayı ister.
   Future<void> _joinWifi() async {
     final w = _info?.wifi;
     if (w == null) return;
+    if (!await _ensureWifiOn()) return;
     _setStatus('"${w.ssid}" ağına bağlanılıyor…\nAçılan pencerede ağı seçip "Bağlan"a dokunun.',
         _Phase.connecting);
     final ok = await Net.connectWifi(w);
