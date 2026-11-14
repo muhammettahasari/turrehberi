@@ -1,0 +1,19 @@
+name: turses
+description: Rehberin sesini gruptaki telefonlara yerel ağ (mobil erişim noktası) üzerinden ileten uygulama.
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: '>=3.4.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_webrtc: any
+  mobile_scanner: any
+  qr_flutter: any
+  permission_handler: any
+  wakelock_plus: any
+
+flutter:
+  uses-material-design: true
