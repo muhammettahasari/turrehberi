@@ -93,11 +93,31 @@ class _ListenerPageState extends State<ListenerPage> {
     }
     _info = info;
     _closing = false;
-    setState(() {
-      _phase = _Phase.connecting;
-      _status = 'Rehbere bağlanılıyor…';
-    });
+    if (info.wifi != null) {
+      await _joinWifi();
+      if (_closing || !mounted) return;
+    } else {
+      setState(() {
+        _phase = _Phase.connecting;
+        _status = 'Rehbere bağlanılıyor…';
+      });
+    }
     _connect();
+  }
+
+  /// Karekoddaki Wi-Fi ağına bağlanır. Android "Bağlan" onayı ister.
+  Future<void> _joinWifi() async {
+    final w = _info?.wifi;
+    if (w == null) return;
+    _setStatus('"${w.ssid}" ağına bağlanılıyor…\nAçılan pencerede ağı seçip "Bağlan"a dokunun.',
+        _Phase.connecting);
+    final ok = await Net.connectWifi(w);
+    if (!ok) {
+      _setStatus('Ağa otomatik bağlanılamadı. Wi-Fi ayarlarından "${w.ssid}" ağına elle '
+          'bağlanın; uygulama bağlanmayı denemeye devam ediyor…');
+    } else {
+      _setStatus('Ağa bağlanıldı, rehbere bağlanılıyor…');
+    }
   }
 
   Future<void> _connect() async {
@@ -299,19 +319,7 @@ class _ListenerPageState extends State<ListenerPage> {
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
       children: [
-        _step('1', 'Rehberin Wi-Fi ağına bağlanın',
-            'Rehberin gösterdiği Wi-Fi karekodunu telefonunuzun kamerasıyla okutun ya da '
-                'Wi-Fi ayarlarından ağı seçin.'),
-        Align(
-          alignment: Alignment.centerLeft,
-          child: TextButton.icon(
-            onPressed: Net.openWifiSettings,
-            icon: const Icon(Icons.wifi_rounded),
-            label: const Text('Wi-Fi ayarlarını aç'),
-          ),
-        ),
-        const SizedBox(height: 8),
-        _step('2', 'Adınızı yazın', 'Rehber listesinde bu isimle görünürsünüz.'),
+        _step('1', 'Adınızı yazın', 'Rehber listesinde bu isimle görünürsünüz.'),
         const SizedBox(height: 8),
         TextField(
           controller: _name,
@@ -325,7 +333,9 @@ class _ListenerPageState extends State<ListenerPage> {
           ),
         ),
         const SizedBox(height: 4),
-        _step('3', 'TurSes karekodunu okutun', 'Kulaklığınızı takmayı unutmayın.'),
+        _step('2', 'Kulaklığınızı takın', 'Kablolu ya da Bluetooth fark etmez.'),
+        _step('3', 'Rehberin karekodunu okutun',
+            'Telefonunuz rehberin ağına kendiliğinden bağlanır. Android "Bağlan" diye sorarsa onaylayın.'),
         const SizedBox(height: 14),
         FilledButton.icon(
           style: FilledButton.styleFrom(
@@ -410,6 +420,22 @@ class _ListenerPageState extends State<ListenerPage> {
                   textAlign: TextAlign.center, style: TextStyle(color: Colors.black54)),
             if (!listening && !full) const LinearProgressIndicator(),
             const SizedBox(height: 28),
+            if (!listening && !full && _info?.wifi != null) ...[
+              TextButton.icon(
+                onPressed: () async {
+                  await _joinWifi();
+                  _connect();
+                },
+                icon: const Icon(Icons.wifi_rounded),
+                label: const Text('Ağa yeniden bağlan'),
+              ),
+              TextButton.icon(
+                onPressed: Net.openWifiSettings,
+                icon: const Icon(Icons.settings_rounded),
+                label: const Text('Wi-Fi ayarlarını aç'),
+              ),
+              const SizedBox(height: 8),
+            ],
             OutlinedButton.icon(
               onPressed: full
                   ? () => setState(() {

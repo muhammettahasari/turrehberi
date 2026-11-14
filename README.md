@@ -2,7 +2,11 @@
 
 Rehber konuşur, gruptakiler kendi telefonlarına taktıkları kulaklıktan canlı dinler.
 
-Bu ilk deneme sürümü yalnızca **mobil erişim noktası (hotspot)** üzerinden çalışır: internet ya da sunucu gerekmez, ses doğrudan rehberin telefonundan gruptaki telefonlara gider. Rehber başına en fazla 10 dinleyici kabul edilir (ücretsiz sürüm sınırı).
+Bu deneme sürümü yerel Wi-Fi üzerinden çalışır: internet ya da sunucu gerekmez, ses doğrudan rehberin telefonundan gruptaki telefonlara gider. Rehber başına en fazla 10 dinleyici kabul edilir (ücretsiz sürüm sınırı).
+
+- **TurSes ağı (önerilen):** Rehberin uygulaması kendi Wi-Fi ağını açar; karekod ağ adı ve şifresini taşır, turist telefonu karekodu okutunca bu ağa kendiliğinden bağlanır (Android bir kez "Bağlan" onayı ister).
+- **Kendi erişim noktası:** Rehber telefonunun normal hotspot'u. Ağ adı ve şifresi bir kez uygulamaya yazılır, karekoda eklenir.
+- **Kendini güncelleme:** Uygulama açılışta yeni deneme sürümü olup olmadığına bakar; "Güncelle" ile indirip kurar. Bunun için her sürümün aynı anahtarla imzalanması gerekir (GitHub gizli değişkenleri `TURSES_KS`, `TURSES_KS_PASS`).
 
 ## Uygulamayı telefona kurma
 
@@ -14,13 +18,13 @@ Bu ilk deneme sürümü yalnızca **mobil erişim noktası (hotspot)** üzerinde
 
 **Rehber telefonu**
 1. TurSes → **Rehber**. Mikrofon iznini verin.
-2. "Erişim noktası ayarlarını aç" ile mobil erişim noktasını açın, uygulamaya geri dönün.
-3. Ekranda TurSes karekodu çıkar.
+2. **TurSes ağını başlat**'a dokunun (telefonun normal erişim noktası kapalı olmalı). İstenen izinleri verin.
+3. Ekranda karekod çıkar.
 
 **Turist telefonu**
-1. Wi-Fi ayarlarından rehberin erişim noktasına bağlanın.
-2. Kulaklığı takın.
-3. TurSes → **Turist** → adınızı yazın → **Karekodu okut** → rehberin ekranındaki karekodu okutun.
+1. Kulaklığı takın.
+2. TurSes → **Turist** → adınızı yazın → **Karekodu okut**.
+3. Android "ağa bağlan" diye sorarsa onaylayın.
 4. "Rehberi dinliyorsunuz" yazısı çıkınca rehber konuşsun.
 
 ## Ölçülecekler
@@ -33,7 +37,7 @@ Bu ilk deneme sürümü yalnızca **mobil erişim noktası (hotspot)** üzerinde
 ## Bilinen sınırlar (bu sürüm)
 
 - Ekran açık kalmalı; uygulama arka plana alınınca ses kesilebilir.
-- Turist Wi-Fi'a elle bağlanıyor; tek karekodla otomatik bağlanma sonraki adım.
+- TurSes ağı internet paylaşmaz; turist telefonu internet için mobil veriyi kullanmaya devam eder.
 - Cep Wi-Fi cihazı ve internet modu sonraki adımlar.
 
 ## Teknik

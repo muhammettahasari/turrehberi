@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import 'guide_page.dart';
 import 'listener_page.dart';
+import 'net.dart';
+import 'updater.dart';
 
 void main() => runApp(const TurSesApp());
 
@@ -32,8 +34,60 @@ class TurSesApp extends StatelessWidget {
   }
 }
 
-class HomePage extends StatelessWidget {
+class HomePage extends StatefulWidget {
   const HomePage({super.key});
+
+  @override
+  State<HomePage> createState() => _HomePageState();
+}
+
+class _HomePageState extends State<HomePage> {
+  UpdateInfo? _update;
+  double? _progress; // null: indirme yok
+  String? _updateMsg;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkUpdate();
+  }
+
+  Future<void> _checkUpdate() async {
+    final u = await Updater.check();
+    if (mounted && u != null) setState(() => _update = u);
+  }
+
+  Future<void> _installUpdate() async {
+    final u = _update;
+    if (u == null || _progress != null) return;
+    setState(() {
+      _progress = 0;
+      _updateMsg = null;
+    });
+    try {
+      final f = await Updater.download(u, (p) {
+        if (mounted) setState(() => _progress = p);
+      });
+      final r = await Net.installApk(f.path);
+      if (!mounted) return;
+      setState(() {
+        _progress = null;
+        _updateMsg = switch (r) {
+          'permission' =>
+            'Açılan ekranda "Bu kaynaktan izin ver"i açın, geri dönüp tekrar "Güncelle"ye dokunun.',
+          'started' => 'Açılan pencerede "Güncelle"ye dokunun.',
+          _ => 'Güncelleme başlatılamadı.',
+        };
+      });
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _progress = null;
+          _updateMsg = 'İndirilemedi: $e';
+        });
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -42,6 +96,7 @@ class HomePage extends StatelessWidget {
         child: ListView(
           padding: const EdgeInsets.fromLTRB(20, 32, 20, 20),
           children: [
+            if (_update != null) _updateBanner(),
             const Icon(Icons.headphones_rounded, size: 56, color: kBrand),
             const SizedBox(height: 8),
             Text('TurSes',
@@ -57,7 +112,7 @@ class HomePage extends StatelessWidget {
             _RoleCard(
               icon: Icons.mic_rounded,
               title: 'Rehber',
-              subtitle: 'Mobil erişim noktasını aç, karekodu göster, konuş.',
+              subtitle: 'Ağı aç, karekodu göster, konuş.',
               color: kBrand,
               onTap: () => Navigator.of(context)
                   .push(MaterialPageRoute(builder: (_) => const GuidePage())),
@@ -66,20 +121,56 @@ class HomePage extends StatelessWidget {
             _RoleCard(
               icon: Icons.qr_code_scanner_rounded,
               title: 'Turist',
-              subtitle: 'Rehberin ağına bağlan, karekodu okut, dinle.',
+              subtitle: 'Karekodu okut, rehberin ağına bağlan, dinle.',
               color: kAccent,
               dark: true,
               onTap: () => Navigator.of(context)
                   .push(MaterialPageRoute(builder: (_) => const ListenerPage())),
             ),
             const SizedBox(height: 24),
-            const Text(
-              'Deneme sürümü · Ücretsiz: rehber başına en fazla 10 dinleyici',
+            Text(
+              'Deneme sürümü ${kBuild == 0 ? '' : kBuild} · '
+              'Ücretsiz: rehber başına en fazla 10 dinleyici',
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 12, color: Colors.black54),
+              style: const TextStyle(fontSize: 12, color: Colors.black54),
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _updateBanner() {
+    final u = _update!;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 20),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF4DC),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFF0D28F)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text('Yeni sürüm hazır: deneme ${u.build}',
+              style: const TextStyle(fontWeight: FontWeight.w700)),
+          const SizedBox(height: 8),
+          if (_progress != null) ...[
+            LinearProgressIndicator(value: _progress == 0 ? null : _progress),
+            const SizedBox(height: 6),
+            Text('İndiriliyor… %${((_progress ?? 0) * 100).round()}'),
+          ] else
+            FilledButton.icon(
+              onPressed: _installUpdate,
+              icon: const Icon(Icons.system_update_rounded),
+              label: const Text('Güncelle'),
+            ),
+          if (_updateMsg != null) ...[
+            const SizedBox(height: 6),
+            Text(_updateMsg!, style: const TextStyle(fontSize: 13)),
+          ],
+        ],
       ),
     );
   }

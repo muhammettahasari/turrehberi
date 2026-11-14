@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 import 'main.dart';
@@ -51,6 +52,14 @@ class _GuidePageState extends State<GuidePage> with WidgetsBindingObserver {
   String? _error;
   Timer? _ipTimer;
 
+  // Ağ: uygulamanın açtığı ağ (önerilen) ya da rehberin kendi erişim noktası.
+  WifiCreds? _wifi;
+  bool _ownNet = false;
+  bool _netBusy = false;
+  String? _netMsg;
+  final _ssidCtl = TextEditingController();
+  final _passCtl = TextEditingController();
+
   @override
   void initState() {
     super.initState();
@@ -69,6 +78,9 @@ class _GuidePageState extends State<GuidePage> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _stop();
+    if (_ownNet) Net.stopLocalHotspot();
+    _ssidCtl.dispose();
+    _passCtl.dispose();
     WakelockPlus.disable();
     super.dispose();
   }
@@ -92,6 +104,7 @@ class _GuidePageState extends State<GuidePage> with WidgetsBindingObserver {
       return;
     }
     _server!.listen(_onRequest, onError: (_) {});
+    await _loadSavedWifi();
     await _refreshAddrs();
     _ipTimer = Timer.periodic(const Duration(seconds: 4), (_) => _refreshAddrs());
     if (mounted) setState(() => _starting = false);
@@ -103,6 +116,71 @@ class _GuidePageState extends State<GuidePage> with WidgetsBindingObserver {
       _error = msg;
       _starting = false;
     });
+  }
+
+  Future<void> _loadSavedWifi() async {
+    try {
+      final sp = await SharedPreferences.getInstance();
+      final ssid = sp.getString('hotspot_ssid') ?? '';
+      final pass = sp.getString('hotspot_pass') ?? '';
+      _ssidCtl.text = ssid;
+      _passCtl.text = pass;
+      if (ssid.isNotEmpty && !_ownNet) _wifi = WifiCreds(ssid, pass);
+    } catch (_) {}
+  }
+
+  Future<void> _saveManualWifi() async {
+    final ssid = _ssidCtl.text.trim();
+    final pass = _passCtl.text;
+    try {
+      final sp = await SharedPreferences.getInstance();
+      await sp.setString('hotspot_ssid', ssid);
+      await sp.setString('hotspot_pass', pass);
+    } catch (_) {}
+    if (!mounted) return;
+    FocusScope.of(context).unfocus();
+    setState(() => _wifi = ssid.isEmpty ? null : WifiCreds(ssid, pass));
+    ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Ağ bilgisi kaydedildi; karekoda eklendi.')));
+  }
+
+  Future<void> _startOwnNet() async {
+    setState(() {
+      _netBusy = true;
+      _netMsg = null;
+    });
+    // Android 13+: yakındaki cihazlar, daha eski sürümler: konum izni.
+    try {
+      await Permission.nearbyWifiDevices.request();
+    } catch (_) {}
+    try {
+      await Permission.locationWhenInUse.request();
+    } catch (_) {}
+    try {
+      final w = await Net.startLocalHotspot();
+      if (!mounted) return;
+      setState(() {
+        _wifi = w;
+        _ownNet = true;
+      });
+      await _refreshAddrs();
+    } catch (e) {
+      if (mounted) setState(() => _netMsg = e.toString());
+    } finally {
+      if (mounted) setState(() => _netBusy = false);
+    }
+  }
+
+  Future<void> _stopOwnNet() async {
+    await Net.stopLocalHotspot();
+    if (!mounted) return;
+    setState(() {
+      _ownNet = false;
+      _wifi = null;
+    });
+    await _loadSavedWifi();
+    if (mounted) setState(() {});
+    await _refreshAddrs();
   }
 
   Future<void> _refreshAddrs() async {
@@ -357,35 +435,95 @@ class _GuidePageState extends State<GuidePage> with WidgetsBindingObserver {
   }
 
   Widget _hotspotCard() {
+    const ok = Color(0xFF1F8A5B);
     return _Card(
-      title: '1 · Mobil erişim noktası',
+      title: '1 · Ağ',
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
-            children: [
-              Icon(_hotspotLikely ? Icons.check_circle_rounded : Icons.info_outline_rounded,
-                  color: _hotspotLikely ? const Color(0xFF1F8A5B) : kAccent),
+          if (_ownNet && _wifi != null) ...[
+            Row(children: [
+              const Icon(Icons.check_circle_rounded, color: ok),
               const SizedBox(width: 8),
-              Expanded(
-                child: Text(_hotspotLikely
-                    ? 'Erişim noktası açık görünüyor.'
-                    : 'Erişim noktasını açın. Turistler bu Wi-Fi ağına bağlanacak.'),
-              ),
+              Expanded(child: Text('TurSes ağı açık: ${_wifi!.ssid}')),
+            ]),
+            const SizedBox(height: 6),
+            const Text('Turistler karekodu okutunca bu ağa kendiliğinden bağlanır.',
+                style: TextStyle(fontSize: 13, color: Colors.black54)),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton(onPressed: _stopOwnNet, child: const Text('Ağı kapat')),
+            ),
+          ] else ...[
+            FilledButton.icon(
+              onPressed: _netBusy ? null : _startOwnNet,
+              icon: _netBusy
+                  ? const SizedBox(
+                      width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Icon(Icons.wifi_tethering_rounded),
+              label: const Text('TurSes ağını başlat (önerilen)'),
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'Uygulama kendi Wi-Fi ağını açar; turistler karekodla bu ağa bağlanır. '
+              'Telefonun normal erişim noktası kapalı olmalı. İnternet paylaşılmaz.',
+              style: TextStyle(fontSize: 13, color: Colors.black54),
+            ),
+            if (_netMsg != null) ...[
+              const SizedBox(height: 8),
+              Text(_netMsg!, style: const TextStyle(color: Color(0xFFC8402F))),
             ],
-          ),
-          const SizedBox(height: 8),
-          const Text(
-            'İpucu: Android erişim noktası ekranındaki "paylaş / karekod" ile turistler '
-            'Wi-Fi\'a şifre yazmadan bağlanabilir.',
-            style: TextStyle(fontSize: 13, color: Colors.black54),
-          ),
-          const SizedBox(height: 10),
-          OutlinedButton.icon(
-            onPressed: Net.openHotspotSettings,
-            icon: const Icon(Icons.wifi_tethering_rounded),
-            label: const Text('Erişim noktası ayarlarını aç'),
-          ),
+            const SizedBox(height: 4),
+            ExpansionTile(
+              tilePadding: EdgeInsets.zero,
+              title: const Text('Kendi erişim noktamı kullanacağım'),
+              subtitle: Text(
+                  _wifi != null ? 'Kayıtlı ağ: ${_wifi!.ssid}' : 'Ağ adı ve şifresini bir kez yazın',
+                  style: const TextStyle(fontSize: 12)),
+              children: [
+                TextField(
+                  controller: _ssidCtl,
+                  decoration: const InputDecoration(
+                      labelText: 'Erişim noktası adı', border: OutlineInputBorder()),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _passCtl,
+                  decoration: const InputDecoration(
+                      labelText: 'Şifre', border: OutlineInputBorder()),
+                ),
+                const SizedBox(height: 8),
+                Row(children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: Net.openHotspotSettings,
+                      icon: const Icon(Icons.settings_rounded),
+                      label: const Text('Ayarları aç'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: FilledButton(
+                        onPressed: _saveManualWifi, child: const Text('Kaydet')),
+                  ),
+                ]),
+                const SizedBox(height: 8),
+                Row(children: [
+                  Icon(_hotspotLikely ? Icons.check_circle_rounded : Icons.info_outline_rounded,
+                      size: 18, color: _hotspotLikely ? ok : kAccent),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                        _hotspotLikely
+                            ? 'Erişim noktası açık görünüyor.'
+                            : 'Erişim noktası kapalı görünüyor.',
+                        style: const TextStyle(fontSize: 13)),
+                  ),
+                ]),
+                const SizedBox(height: 8),
+              ],
+            ),
+          ],
         ],
       ),
     );
@@ -396,21 +534,26 @@ class _GuidePageState extends State<GuidePage> with WidgetsBindingObserver {
     return _Card(
       title: '2 · TurSes karekodu',
       child: ips.isEmpty
-          ? const Text('Ağ adresi bulunamadı. Erişim noktasını açın; karekod kendiliğinden çıkacak.')
+          ? const Text('Ağ adresi bulunamadı. Önce 1. adımdaki ağı açın; karekod kendiliğinden çıkacak.')
           : Column(
               children: [
                 Container(
                   color: Colors.white,
                   padding: const EdgeInsets.all(8),
                   child: QrImageView(
-                    data: JoinInfo(ips, kPort).encode(),
+                    data: JoinInfo(ips, kPort, _wifi).encode(),
                     size: 220,
                     backgroundColor: Colors.white,
                   ),
                 ),
                 const SizedBox(height: 8),
-                const Text('Turistler Wi-Fi\'a bağlandıktan sonra TurSes\'te "Turist" '
-                    'bölümünden bu karekodu okutsun.', textAlign: TextAlign.center),
+                Text(
+                    _wifi != null
+                        ? 'Turistler TurSes\'te "Turist" bölümünden bu karekodu okutsun; '
+                            'ağa kendiliğinden bağlanırlar.'
+                        : 'Ağ bilgisi eklenmedi: turistler önce Wi-Fi\'a elle bağlanmalı, '
+                            'sonra bu karekodu okutmalı.',
+                    textAlign: TextAlign.center),
                 const SizedBox(height: 4),
                 Text('Adres: ${ips.first}:$kPort',
                     style: const TextStyle(fontSize: 12, color: Colors.black54)),
