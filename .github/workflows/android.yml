@@ -33,15 +33,17 @@ jobs:
       - name: Eksik platform dosyalarını oluştur
         run: flutter create --platforms=android --org com.turses --project-name turses .
 
-      - name: Android ayarları (minSdk 24, R8 kuralları)
+      - name: Android ayarları (minSdk 24, compileSdk 37)
         run: |
           f=android/app/build.gradle.kts
           if [ -f "$f" ]; then
             sed -i -E 's/minSdk = flutter\.minSdkVersion/minSdk = 24/' "$f"
+            sed -i -E 's/compileSdk = flutter\.compileSdkVersion/compileSdk = 37/' "$f"
           else
             sed -i -E 's/minSdkVersion flutter\.minSdkVersion/minSdkVersion 24/' android/app/build.gradle
+            sed -i -E 's/compileSdk(Version)? flutter\.compileSdkVersion/compileSdkVersion 37/' android/app/build.gradle
           fi
-          grep -n "minSdk" android/app/build.gradle* || true
+          grep -nE "minSdk|compileSdk" android/app/build.gradle* || true
 
       - name: Paketler
         run: flutter pub get
