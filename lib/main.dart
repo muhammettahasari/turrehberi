@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'guide_page.dart';
 import 'listener_page.dart';
 import 'net.dart';
+import 'profile.dart';
+import 'setup_page.dart';
 import 'updater.dart';
 
 void main() => runApp(const TurSesApp());
@@ -29,8 +31,37 @@ class TurSesApp extends StatelessWidget {
         scaffoldBackgroundColor: kBg,
         appBarTheme: const AppBarTheme(backgroundColor: kBg, foregroundColor: kBrand),
       ),
-      home: const HomePage(),
+      home: const _StartGate(),
     );
+  }
+}
+
+/// Açılışta: ad ve izinler tamamsa ana ekran, değilse kurulum.
+class _StartGate extends StatefulWidget {
+  const _StartGate();
+
+  @override
+  State<_StartGate> createState() => _StartGateState();
+}
+
+class _StartGateState extends State<_StartGate> {
+  bool? _ready;
+
+  @override
+  void initState() {
+    super.initState();
+    () async {
+      await Profile.load();
+      final ok = await Profile.isReady();
+      if (mounted) setState(() => _ready = ok);
+    }();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final r = _ready;
+    if (r == null) return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    return r ? const HomePage() : const SetupPage();
   }
 }
 
@@ -108,7 +139,23 @@ class _HomePageState extends State<HomePage> {
             const SizedBox(height: 4),
             const Text('Rehber konuşur, grup kendi kulaklığından dinler.',
                 textAlign: TextAlign.center),
-            const SizedBox(height: 28),
+            const SizedBox(height: 10),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text('Adınız: ${Profile.name}',
+                    style: const TextStyle(fontWeight: FontWeight.w600)),
+                TextButton(
+                  onPressed: () async {
+                    await Navigator.of(context).push(MaterialPageRoute(
+                        builder: (_) => const SetupPage(fromHome: true)));
+                    if (mounted) setState(() {});
+                  },
+                  child: const Text('Değiştir'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
             _RoleCard(
               icon: Icons.mic_rounded,
               title: 'Rehber',

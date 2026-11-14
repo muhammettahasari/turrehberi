@@ -110,6 +110,28 @@ class Net {
     }
   }
 
+  static Future<int> sdkInt() async {
+    try {
+      return await _ch.invokeMethod<int>('sdkInt') ?? 0;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  static Future<bool> locationEnabled() async {
+    try {
+      return await _ch.invokeMethod<bool>('locationEnabled') ?? true;
+    } catch (_) {
+      return true;
+    }
+  }
+
+  static Future<void> openLocationSettings() async {
+    try {
+      await _ch.invokeMethod('openLocationSettings');
+    } catch (_) {}
+  }
+
   static Future<bool> wifiEnabled() async {
     try {
       return await _ch.invokeMethod<bool>('wifiEnabled') ?? true;

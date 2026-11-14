@@ -10,6 +10,7 @@ import android.net.Uri
 import android.net.wifi.WifiConfiguration
 import android.net.wifi.WifiManager
 import android.net.wifi.WifiNetworkSpecifier
+import android.location.LocationManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -87,6 +88,12 @@ class MainActivity : FlutterActivity() {
                     )
                     "bindWifi" -> result.success(bindWifi())
                     "wifiEnabled" -> result.success(wifiManager().isWifiEnabled)
+                    "sdkInt" -> result.success(Build.VERSION.SDK_INT)
+                    "locationEnabled" -> result.success(locationEnabled())
+                    "openLocationSettings" -> {
+                        startSafely(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
+                        result.success(true)
+                    }
                     "enableWifi" -> result.success(enableWifi())
                     "unbind" -> {
                         releaseWifi()
@@ -346,6 +353,17 @@ class MainActivity : FlutterActivity() {
             if (wm.setWifiEnabled(true)) "enabled" else "failed"
         } catch (e: Exception) {
             "failed"
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun locationEnabled(): Boolean {
+        val lm = getSystemService(Context.LOCATION_SERVICE) as LocationManager
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            lm.isLocationEnabled
+        } else {
+            lm.isProviderEnabled(LocationManager.GPS_PROVIDER) ||
+                lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
         }
     }
 

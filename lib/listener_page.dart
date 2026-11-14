@@ -11,6 +11,7 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 import 'audio.dart';
 import 'main.dart';
 import 'net.dart';
+import 'profile.dart';
 import 'protocol.dart';
 
 enum _Phase { idle, connecting, listening, full }
@@ -25,7 +26,6 @@ class ListenerPage extends StatefulWidget {
 }
 
 class _ListenerPageState extends State<ListenerPage> {
-  final _name = TextEditingController();
   JoinInfo? _info;
   _Phase _phase = _Phase.idle;
   String _status = '';
@@ -33,6 +33,7 @@ class _ListenerPageState extends State<ListenerPage> {
   WebSocket? _ws;
   bool _playing = false;
   bool _guideMuted = false;
+  String? _guideName;
   DateTime? _lastAudio;
   Timer? _watch;
   Timer? _retry;
@@ -53,7 +54,6 @@ class _ListenerPageState extends State<ListenerPage> {
     _cleanup();
     Net.unbind();
     WakelockPlus.disable();
-    _name.dispose();
     super.dispose();
   }
 
@@ -178,7 +178,7 @@ class _ListenerPageState extends State<ListenerPage> {
       cancelOnError: true,
     );
     _setStatus('Rehbere bağlanıldı, ses açılıyor…');
-    _send({'type': 'join', 'name': _name.text.trim()});
+    _send({'type': 'join', 'name': Profile.name});
   }
 
   void _send(Map<String, dynamic> m) {
@@ -218,6 +218,8 @@ class _ListenerPageState extends State<ListenerPage> {
       case 'welcome':
         {
           _guideMuted = m['muted'] == true;
+          final g = (m['guide'] ?? '').toString();
+          if (g.isNotEmpty) _guideName = g;
           _playing = await NativeAudio.startPlayback();
           if (!_playing) {
             _setStatus('Ses çalınamadı. Telefonu yeniden başlatıp tekrar deneyin.');
@@ -297,7 +299,7 @@ class _ListenerPageState extends State<ListenerPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Turist')),
+      appBar: AppBar(title: Text(_guideName == null ? 'Turist' : 'Rehber: $_guideName')),
       body: SafeArea(
         child: _phase == _Phase.idle ? _idleView() : _activeView(),
       ),
@@ -308,22 +310,10 @@ class _ListenerPageState extends State<ListenerPage> {
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
       children: [
-        _step('1', 'Adınızı yazın', 'Rehber listesinde bu isimle görünürsünüz.'),
-        const SizedBox(height: 8),
-        TextField(
-          controller: _name,
-          maxLength: 30,
-          textCapitalization: TextCapitalization.words,
-          decoration: const InputDecoration(
-            hintText: 'Adınız',
-            filled: true,
-            fillColor: Colors.white,
-            border: OutlineInputBorder(),
-          ),
-        ),
-        const SizedBox(height: 4),
-        _step('2', 'Kulaklığınızı takın', 'Kablolu ya da Bluetooth fark etmez.'),
-        _step('3', 'Rehberin karekodunu okutun',
+        Text('Adınız: ${Profile.name}',
+            style: const TextStyle(fontWeight: FontWeight.w600)),
+        _step('1', 'Kulaklığınızı takın', 'Kablolu ya da Bluetooth fark etmez.'),
+        _step('2', 'Rehberin karekodunu okutun',
             'Telefonunuz rehberin ağına kendiliğinden bağlanır. Android "Bağlan" diye sorarsa onaylayın.'),
         const SizedBox(height: 14),
         FilledButton.icon(

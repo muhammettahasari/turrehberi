@@ -12,6 +12,7 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 import 'audio.dart';
 import 'main.dart';
 import 'net.dart';
+import 'profile.dart';
 import 'protocol.dart';
 
 /// Rehbere bağlanan bir dinleyici.
@@ -248,7 +249,7 @@ class _GuidePageState extends State<GuidePage> with WidgetsBindingObserver {
           final n = (m['name'] ?? '').toString().trim();
           p.name = n.isEmpty ? 'Turist ${p.id}' : (n.length > 30 ? n.substring(0, 30) : n);
           _peers[p.id] = p;
-          p.send({'type': 'welcome', 'rate': 16000, 'muted': _muted});
+          p.send({'type': 'welcome', 'rate': 16000, 'muted': _muted, 'guide': Profile.name});
           p.joined = true;
           if (mounted) setState(() {});
         }
@@ -301,7 +302,7 @@ class _GuidePageState extends State<GuidePage> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     final listening = _peers.values.where((p) => p.joined).length;
     return Scaffold(
-      appBar: AppBar(title: const Text('Rehber')),
+      appBar: AppBar(title: Text('Rehber · ${Profile.name}')),
       body: SafeArea(
         child: _error != null
             ? _ErrorBox(_error!)
