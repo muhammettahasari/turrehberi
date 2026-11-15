@@ -9,7 +9,6 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  flutter_webrtc: any
   mobile_scanner: any
   qr_flutter: any
   permission_handler: any

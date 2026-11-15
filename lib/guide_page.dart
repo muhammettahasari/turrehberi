@@ -1,14 +1,15 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
-import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
+import 'audio.dart';
 import 'main.dart';
 import 'net.dart';
 import 'profile.dart';
@@ -21,16 +22,17 @@ class _Peer {
   final int id;
   final WebSocket ws;
   String name = 'Turist';
-  RTCPeerConnection? pc;
-  RTCPeerConnectionState? state;
-  bool remoteSet = false;
-  bool offerSent = false;
-  final List<RTCIceCandidate> inbox = []; // gelen, henüz eklenemeyen adaylar
-  final List<Map<String, dynamic>> outbox = []; // teklif gitmeden çıkan adaylar
+  bool joined = false;
 
   void send(Map<String, dynamic> m) {
     try {
       ws.add(jsonEncode(m));
+    } catch (_) {}
+  }
+
+  void sendAudio(Uint8List frame) {
+    try {
+      ws.add(frame);
     } catch (_) {}
   }
 }
@@ -44,7 +46,9 @@ class GuidePage extends StatefulWidget {
 
 class _GuidePageState extends State<GuidePage> with WidgetsBindingObserver {
   HttpServer? _server;
-  MediaStream? _mic;
+  StreamSubscription<Uint8List>? _micSub;
+  double _level = 0;
+  int _levelTick = 0;
   final Map<int, _Peer> _peers = {};
   int _nextId = 1;
   List<LocalAddr> _addrs = [];
@@ -92,10 +96,9 @@ class _GuidePageState extends State<GuidePage> with WidgetsBindingObserver {
       _fail('Mikrofon izni verilmedi. Ayarlardan TurSes için mikrofona izin verin.');
       return;
     }
-    try {
-      _mic = await navigator.mediaDevices.getUserMedia({'audio': true, 'video': false});
-    } catch (e) {
-      _fail('Mikrofon açılamadı: $e');
+    _micSub = NativeAudio.micFrames().listen(_onMicFrame);
+    if (!await NativeAudio.startCapture()) {
+      _fail('Mikrofon açılamadı. Başka bir uygulama mikrofonu kullanıyor olabilir.');
       return;
     }
     try {
@@ -214,99 +217,50 @@ class _GuidePageState extends State<GuidePage> with WidgetsBindingObserver {
     );
   }
 
+  /// Mikrofondan gelen her 20 ms'lik parçayı bağlı dinleyicilere gönder.
+  void _onMicFrame(Uint8List frame) {
+    if (!_muted) {
+      for (final p in _peers.values) {
+        if (p.joined) p.sendAudio(frame);
+      }
+    }
+    // Göstergeyi saniyede ~10 kez güncelle.
+    if (++_levelTick % 5 == 0 && mounted) {
+      setState(() => _level = _muted ? 0 : NativeAudio.level(frame));
+    }
+  }
+
   Future<void> _onMessage(_Peer p, dynamic data) async {
+    if (data is! String) return;
     Map<String, dynamic> m;
     try {
-      m = (jsonDecode(data as String) as Map).cast<String, dynamic>();
+      m = (jsonDecode(data) as Map).cast<String, dynamic>();
     } catch (_) {
       return;
     }
-    try {
-      switch (m['type']) {
-        case 'join':
-          {
-            if (_peers.length >= kFreeLimit) {
-              p.send({'type': 'full', 'limit': kFreeLimit});
-              await p.ws.close();
-              return;
-            }
-            final n = (m['name'] ?? '').toString().trim();
-            p.name = n.isEmpty ? 'Turist ${p.id}' : (n.length > 30 ? n.substring(0, 30) : n);
-            _peers[p.id] = p;
-            if (mounted) setState(() {});
-            await _sendOffer(p);
+    switch (m['type']) {
+      case 'join':
+        {
+          if (_peers.length >= kFreeLimit) {
+            p.send({'type': 'full', 'limit': kFreeLimit});
+            await p.ws.close();
+            return;
           }
-        case 'answer':
-          {
-            final pc = p.pc;
-            if (pc == null) return;
-            await pc.setRemoteDescription(RTCSessionDescription(m['sdp'] as String, 'answer'));
-            p.remoteSet = true;
-            for (final c in List<RTCIceCandidate>.from(p.inbox)) {
-              await pc.addCandidate(c);
-            }
-            p.inbox.clear();
-          }
-        case 'ice':
-          {
-            final c = RTCIceCandidate(m['candidate'] as String?, m['sdpMid'] as String?,
-                (m['sdpMLineIndex'] as num?)?.toInt());
-            if (p.remoteSet && p.pc != null) {
-              await p.pc!.addCandidate(c);
-            } else {
-              p.inbox.add(c);
-            }
-          }
-        case 'leave':
-          _drop(p);
-      }
-    } catch (_) {
-      // Bozuk bir mesaj tüm yayını düşürmesin.
+          final n = (m['name'] ?? '').toString().trim();
+          p.name = n.isEmpty ? 'Turist ${p.id}' : (n.length > 30 ? n.substring(0, 30) : n);
+          _peers[p.id] = p;
+          p.send({'type': 'welcome', 'rate': 16000, 'muted': _muted, 'guide': Profile.name});
+          p.joined = true;
+          if (mounted) setState(() {});
+        }
+      case 'leave':
+        _drop(p);
     }
-  }
-
-  Future<void> _sendOffer(_Peer p) async {
-    final mic = _mic;
-    if (mic == null) return;
-    final pc = await createPeerConnection(kRtcConfig);
-    p.pc = pc;
-    for (final t in mic.getAudioTracks()) {
-      await pc.addTrack(t, mic);
-    }
-    pc.onIceCandidate = (c) {
-      if (c.candidate == null) return;
-      final msg = <String, dynamic>{
-        'type': 'ice',
-        'candidate': c.candidate,
-        'sdpMid': c.sdpMid,
-        'sdpMLineIndex': c.sdpMLineIndex,
-      };
-      if (p.offerSent) {
-        p.send(msg);
-      } else {
-        p.outbox.add(msg);
-      }
-    };
-    pc.onConnectionState = (s) {
-      p.state = s;
-      if (mounted) setState(() {});
-      if (s == RTCPeerConnectionState.RTCPeerConnectionStateFailed) _drop(p);
-    };
-    final offer = await pc.createOffer({});
-    await pc.setLocalDescription(offer);
-    p.send({'type': 'offer', 'sdp': offer.sdp, 'guide': Profile.name});
-    p.offerSent = true;
-    for (final msg in p.outbox) {
-      p.send(msg);
-    }
-    p.outbox.clear();
   }
 
   void _drop(_Peer p) {
+    p.joined = false;
     final removed = _peers.remove(p.id) != null;
-    final pc = p.pc;
-    p.pc = null;
-    pc?.close();
     try {
       p.ws.close();
     } catch (_) {}
@@ -314,11 +268,12 @@ class _GuidePageState extends State<GuidePage> with WidgetsBindingObserver {
   }
 
   void _toggleMute() {
-    final mic = _mic;
-    if (mic == null) return;
-    setState(() => _muted = !_muted);
-    for (final t in mic.getAudioTracks()) {
-      t.enabled = !_muted;
+    setState(() {
+      _muted = !_muted;
+      if (_muted) _level = 0;
+    });
+    for (final p in _peers.values) {
+      p.send({'type': 'muted', 'value': _muted});
     }
   }
 
@@ -331,18 +286,9 @@ class _GuidePageState extends State<GuidePage> with WidgetsBindingObserver {
       await _server?.close(force: true);
     } catch (_) {}
     _server = null;
-    final mic = _mic;
-    _mic = null;
-    if (mic != null) {
-      for (final t in mic.getTracks()) {
-        try {
-          await t.stop();
-        } catch (_) {}
-      }
-      try {
-        await mic.dispose();
-      } catch (_) {}
-    }
+    await NativeAudio.stopCapture();
+    await _micSub?.cancel();
+    _micSub = null;
   }
 
   // ---------------- arayüz ----------------
@@ -352,24 +298,9 @@ class _GuidePageState extends State<GuidePage> with WidgetsBindingObserver {
 
   bool get _hotspotLikely => _addrs.any((a) => a.rank == 0);
 
-  String _stateLabel(_Peer p) {
-    switch (p.state) {
-      case RTCPeerConnectionState.RTCPeerConnectionStateConnected:
-        return 'Dinliyor';
-      case RTCPeerConnectionState.RTCPeerConnectionStateDisconnected:
-        return 'Kesildi, bekleniyor';
-      case RTCPeerConnectionState.RTCPeerConnectionStateFailed:
-        return 'Bağlantı sorunu';
-      default:
-        return 'Bağlanıyor…';
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
-    final listening = _peers.values
-        .where((p) => p.state == RTCPeerConnectionState.RTCPeerConnectionStateConnected)
-        .length;
+    final listening = _peers.values.where((p) => p.joined).length;
     return Scaffold(
       appBar: AppBar(title: Text('Rehber · ${Profile.name}')),
       body: SafeArea(
@@ -424,6 +355,19 @@ class _GuidePageState extends State<GuidePage> with WidgetsBindingObserver {
             ),
           ),
           const SizedBox(height: 14),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(6),
+            child: SizedBox(
+              width: 220,
+              child: LinearProgressIndicator(
+                value: (_level * 3).clamp(0.0, 1.0),
+                minHeight: 8,
+                backgroundColor: const Color(0xFFECE8DE),
+                color: const Color(0xFF1F8A5B),
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
           Text(
             _muted
                 ? 'Grup sizi duymuyor. Açmak için daireye dokunun.'
@@ -578,12 +522,10 @@ class _GuidePageState extends State<GuidePage> with WidgetsBindingObserver {
                     leading: Icon(
                       Icons.circle,
                       size: 12,
-                      color: p.state == RTCPeerConnectionState.RTCPeerConnectionStateConnected
-                          ? const Color(0xFF1F8A5B)
-                          : Colors.grey,
+                      color: p.joined ? const Color(0xFF1F8A5B) : Colors.grey,
                     ),
                     title: Text(p.name),
-                    trailing: Text(_stateLabel(p),
+                    trailing: Text(p.joined ? 'Dinliyor' : 'Bağlanıyor…',
                         style: const TextStyle(fontSize: 13, color: Colors.black54)),
                   ),
               ],

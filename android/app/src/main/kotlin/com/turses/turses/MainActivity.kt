@@ -18,6 +18,7 @@ import android.provider.Settings
 import androidx.core.content.FileProvider
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
 import java.net.Inet4Address
@@ -28,6 +29,9 @@ class MainActivity : FlutterActivity() {
 
     private val main = Handler(Looper.getMainLooper())
 
+    /** Mikrofon ve çalma (yerel ağ sesi). */
+    private val audio = AudioEngine()
+
     /** Rehber: uygulamanın açtığı yerel erişim noktası. */
     private var hotspot: WifiManager.LocalOnlyHotspotReservation? = null
 
@@ -37,6 +41,36 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        val messenger = flutterEngine.dartExecutor.binaryMessenger
+        EventChannel(messenger, "turses/mic").setStreamHandler(object : EventChannel.StreamHandler {
+            override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
+                audio.sink = events
+            }
+
+            override fun onCancel(arguments: Any?) {
+                audio.sink = null
+            }
+        })
+        MethodChannel(messenger, "turses/audio").setMethodCallHandler { call, result ->
+            when (call.method) {
+                "startCapture" -> result.success(audio.startCapture())
+                "stopCapture" -> {
+                    audio.stopCapture()
+                    result.success(true)
+                }
+                "startPlayback" -> result.success(audio.startPlayback())
+                "stopPlayback" -> {
+                    audio.stopPlayback()
+                    result.success(true)
+                }
+                "play" -> {
+                    val frame = call.arguments as? ByteArray
+                    if (frame != null) audio.play(frame)
+                    result.success(null)
+                }
+                else -> result.notImplemented()
+            }
+        }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "turses/net")
             .setMethodCallHandler { call, result ->
                 when (call.method) {
@@ -86,6 +120,8 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun onDestroy() {
+        audio.stopCapture()
+        audio.stopPlayback()
         stopLocalHotspot()
         releaseWifi()
         super.onDestroy()
