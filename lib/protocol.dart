@@ -8,6 +8,12 @@ const int kFreeLimit = 10;
 
 const String kAppTag = 'turses';
 
+/// Yerel ağda internet ya da STUN sunucusu gerekmez.
+const Map<String, dynamic> kRtcConfig = {
+  'iceServers': <Map<String, dynamic>>[],
+  'sdpSemantics': 'unified-plan',
+};
+
 /// Wi-Fi ağ bilgisi. sec: 0 açık, 1 WPA2, 2 WPA2/WPA3 geçiş, 3 WPA3.
 class WifiCreds {
   WifiCreds(this.ssid, this.pass, [this.sec = 1]);

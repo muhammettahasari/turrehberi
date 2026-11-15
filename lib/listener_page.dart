@@ -1,22 +1,19 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
-import 'audio.dart';
 import 'main.dart';
 import 'net.dart';
 import 'profile.dart';
 import 'protocol.dart';
 
 enum _Phase { idle, connecting, listening, full }
-
-const _kListening = 'Rehberi dinliyorsunuz';
 
 class ListenerPage extends StatefulWidget {
   const ListenerPage({super.key});
@@ -31,11 +28,12 @@ class _ListenerPageState extends State<ListenerPage> {
   String _status = '';
 
   WebSocket? _ws;
-  bool _playing = false;
-  bool _guideMuted = false;
+  RTCPeerConnection? _pc;
+  bool _remoteSet = false;
+  bool _answerSent = false;
+  final List<RTCIceCandidate> _inbox = [];
+  final List<Map<String, dynamic>> _outbox = [];
   String? _guideName;
-  DateTime? _lastAudio;
-  Timer? _watch;
   Timer? _retry;
   bool _closing = false;
   bool _connecting = false;
@@ -57,9 +55,12 @@ class _ListenerPageState extends State<ListenerPage> {
     super.dispose();
   }
 
-  /// Ses "medya" olarak çalınır (AudioEngine.kt): kulaklıkta (kablolu ya da
-  /// Bluetooth) çıkar, ses tuşları medya sesini ayarlar.
+  /// Sesi "medya" olarak çal: kulaklıkta (kablolu ya da Bluetooth) yüksek
+  /// kaliteyle çıkar, ses tuşları medya sesini ayarlar.
   Future<void> _setupAudio() async {
+    try {
+      await Helper.setAndroidAudioConfiguration(AndroidAudioConfiguration.media);
+    } catch (_) {}
     try {
       await Permission.bluetoothConnect.request();
     } catch (_) {}
@@ -196,63 +197,89 @@ class _ListenerPageState extends State<ListenerPage> {
   }
 
   Future<void> _onMessage(dynamic data) async {
-    if (data is! String) {
-      // 20 ms'lik ses parçası
-      if (!_playing) return;
-      final frame = data is Uint8List ? data : Uint8List.fromList(data as List<int>);
-      NativeAudio.play(frame);
-      final first = _lastAudio == null;
-      _lastAudio = DateTime.now();
-      if (first || _phase != _Phase.listening || _status != _kListening) {
-        _setStatus(_kListening, _Phase.listening);
-      }
-      return;
-    }
     Map<String, dynamic> m;
     try {
-      m = (jsonDecode(data) as Map).cast<String, dynamic>();
+      m = (jsonDecode(data as String) as Map).cast<String, dynamic>();
     } catch (_) {
       return;
     }
-    switch (m['type']) {
-      case 'welcome':
-        {
-          _guideMuted = m['muted'] == true;
-          final g = (m['guide'] ?? '').toString();
-          if (g.isNotEmpty) _guideName = g;
-          _playing = await NativeAudio.startPlayback();
-          if (!_playing) {
-            _setStatus('Ses çalınamadı. Telefonu yeniden başlatıp tekrar deneyin.');
-            return;
+    try {
+      switch (m['type']) {
+        case 'offer':
+          {
+            final g = (m['guide'] ?? '').toString();
+            if (g.isNotEmpty && g != _guideName && mounted) setState(() => _guideName = g);
+            await _answer(m['sdp'] as String);
           }
-          _setStatus(_guideMuted ? 'Bağlandınız. Rehber şu an sessizde.' : 'Bağlandınız, ses bekleniyor…',
-              _Phase.listening);
-          _watch?.cancel();
-          _watch = Timer.periodic(const Duration(seconds: 1), (_) => _checkSilence());
-        }
-      case 'muted':
-        {
-          _guideMuted = m['value'] == true;
-          if (_guideMuted) _setStatus('Rehber şu an sessizde.', _Phase.listening);
-        }
-      case 'full':
-        {
-          _closing = true;
-          _cleanup();
-          final limit = m['limit'] ?? kFreeLimit;
-          _setStatus('Bu tur dolu. Ücretsiz sürümde bir rehbere en fazla $limit kişi bağlanabilir.',
-              _Phase.full);
-        }
+        case 'ice':
+          {
+            final c = RTCIceCandidate(m['candidate'] as String?, m['sdpMid'] as String?,
+                (m['sdpMLineIndex'] as num?)?.toInt());
+            if (_remoteSet && _pc != null) {
+              await _pc!.addCandidate(c);
+            } else {
+              _inbox.add(c);
+            }
+          }
+        case 'full':
+          {
+            _closing = true;
+            _cleanup();
+            final limit = m['limit'] ?? kFreeLimit;
+            _setStatus('Bu tur dolu. Ücretsiz sürümde bir rehbere en fazla $limit kişi bağlanabilir.',
+                _Phase.full);
+          }
+      }
+    } catch (_) {
+      _onLost();
     }
   }
 
-  /// Bağlıyken ses kesilirse kullanıcıya söyle.
-  void _checkSilence() {
-    if (!mounted || _phase != _Phase.listening || _guideMuted) return;
-    final last = _lastAudio;
-    if (last != null && DateTime.now().difference(last) > const Duration(seconds: 3)) {
-      _setStatus('Ses gelmiyor; bağlantı zayıf olabilir. Rehbere yaklaşın.');
+  Future<void> _answer(String sdp) async {
+    await _closePc();
+    final pc = await createPeerConnection(kRtcConfig);
+    _pc = pc;
+    _remoteSet = false;
+    _answerSent = false;
+    pc.onIceCandidate = (c) {
+      if (c.candidate == null) return;
+      final msg = <String, dynamic>{
+        'type': 'ice',
+        'candidate': c.candidate,
+        'sdpMid': c.sdpMid,
+        'sdpMLineIndex': c.sdpMLineIndex,
+      };
+      if (_answerSent) {
+        _send(msg);
+      } else {
+        _outbox.add(msg);
+      }
+    };
+    pc.onConnectionState = (s) {
+      if (s == RTCPeerConnectionState.RTCPeerConnectionStateConnected) {
+        _setStatus('Rehberi dinliyorsunuz', _Phase.listening);
+      } else if (s == RTCPeerConnectionState.RTCPeerConnectionStateDisconnected) {
+        _setStatus('Bağlantı zayıfladı, bekleniyor…', _Phase.connecting);
+      } else if (s == RTCPeerConnectionState.RTCPeerConnectionStateFailed) {
+        _onLost();
+      }
+    };
+    // Gelen ses parçası Android'de kendiliğinden çalınır.
+    pc.onTrack = (_) {};
+    await pc.setRemoteDescription(RTCSessionDescription(sdp, 'offer'));
+    _remoteSet = true;
+    for (final c in List<RTCIceCandidate>.from(_inbox)) {
+      await pc.addCandidate(c);
     }
+    _inbox.clear();
+    final answer = await pc.createAnswer({});
+    await pc.setLocalDescription(answer);
+    _send({'type': 'answer', 'sdp': answer.sdp});
+    _answerSent = true;
+    for (final msg in _outbox) {
+      _send(msg);
+    }
+    _outbox.clear();
   }
 
   void _onLost() {
@@ -269,12 +296,22 @@ class _ListenerPageState extends State<ListenerPage> {
     });
   }
 
+  Future<void> _closePc() async {
+    final pc = _pc;
+    _pc = null;
+    _remoteSet = false;
+    _answerSent = false;
+    _outbox.clear();
+    if (pc != null) {
+      try {
+        await pc.close();
+      } catch (_) {}
+    }
+  }
+
   void _cleanup() {
-    _watch?.cancel();
-    _watch = null;
-    _playing = false;
-    _lastAudio = null;
-    NativeAudio.stopPlayback();
+    _closePc();
+    _inbox.clear();
     final ws = _ws;
     _ws = null;
     try {
