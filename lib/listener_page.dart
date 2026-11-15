@@ -136,8 +136,9 @@ class _ListenerPageState extends State<ListenerPage> {
         _Phase.connecting);
     final ok = await Net.connectWifi(w);
     if (!ok) {
-      _setStatus('Ağa otomatik bağlanılamadı. Wi-Fi ayarlarından "${w.ssid}" ağına elle '
-          'bağlanın; uygulama bağlanmayı denemeye devam ediyor…');
+      _setStatus('Ağa otomatik bağlanılamadı. Wi-Fi ayarlarından elle bağlanın:\n'
+          'Ağ adı: ${w.ssid}\nŞifre: ${w.pass.isEmpty ? '(şifresiz)' : w.pass}\n'
+          'Uygulama bağlanmayı denemeye devam ediyor…');
     } else {
       _setStatus('Ağa bağlanıldı, rehbere bağlanılıyor…');
     }

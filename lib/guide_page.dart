@@ -112,6 +112,8 @@ class _GuidePageState extends State<GuidePage> with WidgetsBindingObserver {
     await _refreshAddrs();
     _ipTimer = Timer.periodic(const Duration(seconds: 4), (_) => _refreshAddrs());
     if (mounted) setState(() => _starting = false);
+    // Rehber hiçbir şey açmak zorunda kalmasın: TurSes ağını kendiliğinden başlat.
+    if (_wifi == null) await _startOwnNet();
   }
 
   void _fail(String msg) {
@@ -395,6 +397,8 @@ class _GuidePageState extends State<GuidePage> with WidgetsBindingObserver {
             const SizedBox(height: 6),
             const Text('Turistler karekodu okutunca bu ağa kendiliğinden bağlanır.',
                 style: TextStyle(fontSize: 13, color: Colors.black54)),
+            const SizedBox(height: 8),
+            _credsBox(_wifi!),
             Align(
               alignment: Alignment.centerLeft,
               child: TextButton(onPressed: _stopOwnNet, child: const Text('Ağı kapat')),
@@ -411,7 +415,8 @@ class _GuidePageState extends State<GuidePage> with WidgetsBindingObserver {
             const SizedBox(height: 6),
             const Text(
               'Uygulama kendi Wi-Fi ağını açar; turistler karekodla bu ağa bağlanır. '
-              'Telefonun normal erişim noktası kapalı olmalı. İnternet paylaşılmaz.',
+              'Telefonun "Mobil erişim noktası" kapalı olmalı, konum açık olmalı. '
+              'Mobil veri açık ya da kapalı olabilir; internet paylaşılmaz.',
               style: TextStyle(fontSize: 13, color: Colors.black54),
             ),
             if (_netMsg != null) ...[
@@ -419,6 +424,10 @@ class _GuidePageState extends State<GuidePage> with WidgetsBindingObserver {
               Text(_netMsg!, style: const TextStyle(color: Color(0xFFC8402F))),
             ],
             const SizedBox(height: 4),
+            if (_wifi != null) ...[
+              const SizedBox(height: 8),
+              _credsBox(_wifi!),
+            ],
             ExpansionTile(
               tilePadding: EdgeInsets.zero,
               title: const Text('Kendi erişim noktamı kullanacağım'),
@@ -469,6 +478,29 @@ class _GuidePageState extends State<GuidePage> with WidgetsBindingObserver {
               ],
             ),
           ],
+        ],
+      ),
+    );
+  }
+
+  /// Otomatik bağlanamayan turist için ağ adı ve şifre.
+  Widget _credsBox(WifiCreds w) {
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF4F1EA),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Elle bağlanmak isteyenler için:',
+              style: TextStyle(fontSize: 12, color: Colors.black54)),
+          const SizedBox(height: 4),
+          SelectableText('Ağ adı:  ${w.ssid}',
+              style: const TextStyle(fontWeight: FontWeight.w600)),
+          SelectableText('Şifre:   ${w.pass.isEmpty ? '(şifresiz)' : w.pass}',
+              style: const TextStyle(fontWeight: FontWeight.w600)),
         ],
       ),
     );
